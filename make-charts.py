@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-import sys, os, csv, re, datetime
+import sys, os, time, csv, re, datetime
 import matplotlib.pyplot as plt
 
 one_day = datetime.timedelta(days=1)
@@ -133,6 +133,7 @@ class RegionData:
     def __init__(self, region, subregions, population_data):
         self.name = region.lower()
         self.region = region
+        self.subregion = region
         self.subregions = dict([(sr.name, sr,) for sr in subregions])
         self.cases = [sum([(rs.cases[i] or 0) for rs in subregions]) for i in range(len(subregions[0].cases))]
         fq_region = self.region.lower()
@@ -184,5 +185,29 @@ def merge_data(subregion_cases):
 cases_data_format, subregion_cases = \
     read_data('COVID-19/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv')
 subregions, regions = merge_data(subregion_cases)
-canada_subregions = [sr.name for sr in regions['canada'].subregions.values() if sr.population]
+canada_subregions = [sr for sr in regions['canada'].subregions.values() if sr.population]
 
+dates = cases_data_format.dates
+
+def plot_srs(max_len, srs):
+    fig, ax = plt.subplots()
+    ax.set_xlabel('Days Since 1 Case Per 100,000 Confirmed')
+    ax.set_ylabel('Confirmed Cases Per 100,000')
+    ax.set_yscale('log')
+    ax.set_title('Comparison Of COVID-19 Confirmed Cases Normalized By Population')
+    ax.plot(range(max_len), [1.33 ** x for x in range(max_len)], label='33% Daily Growth')
+    for sr in srs:
+        cases = sr.cases
+        for i in range(len(cases)):
+            per_100k = cases[i] * 100000 / sr.population
+            if per_100k >= 1:
+                print('Data for %s begins at %s, with %d infected (%g per 100,000)'
+                    % (sr.subregion, dates[i], cases[i], per_100k))
+                data = [c * 100000 / sr.population for c in sr.cases[i:i + max_len]]
+                ax.plot(range(len(data)), data, label=sr.subregion)
+                break
+    ax.legend()
+    plt.show()
+
+plot_srs(15, [subregions[n] for n in ['canada/british columbia', 'canada/alberta', 'canada/ontario', 'canada/quebec']])
+plot_srs(30, [subregions['canada/british columbia']] + [regions[n] for n in ['canada', 'korea, south', 'japan', 'italy', 'france', 'us', 'germany']])
