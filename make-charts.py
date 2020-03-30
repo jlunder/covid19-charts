@@ -19,6 +19,8 @@ region_populations = {
     'canada/northwest territories': 44904,
     'canada/nunavut': 39097,
 
+    'china/hubei': 59050000,
+
     'us': 331002651,
     'italy': 60484989,
     'korea, south': 51269185,
@@ -105,13 +107,24 @@ class DataFormat:
 
 
 class RegionSourceData:
-    def __init__(self, data_format, row):
+    @staticmethod
+    def from_row(data_format, row):
+        return RegionSourceData(
+            data_format = data_format,
+            region = data_format.region(row),
+            subregion = data_format.subregion(row),
+            latitude = data_format.latitude(row),
+            longitude = data_format.longitude(row),
+            data = data_format.data(row)
+        )
+
+    def __init__(self, data_format=None, region=None, subregion=None, latitude=None, longitude=None, data=None):
         self.data_format = data_format
-        self.region = data_format.region(row)
-        self.subregion = data_format.subregion(row)
-        self.latitude = data_format.latitude(row)
-        self.longitude = data_format.longitude(row)
-        self.data = data_format.data(row)
+        self.region = region
+        self.subregion = subregion
+        self.latitude = latitude
+        self.longitude = longitude
+        self.data = data
 
 
 class SubregionData:
@@ -154,7 +167,7 @@ def read_data(data_path):
             if not data_format:
                 data_format = DataFormat(row)
             else:
-                region_data.append(RegionSourceData(data_format, row))
+                region_data.append(RegionSourceData.from_row(data_format, row))
         return (data_format, region_data,)
 
 
@@ -186,28 +199,121 @@ cases_data_format, subregion_cases = \
     read_data('COVID-19/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv')
 subregions, regions = merge_data(subregion_cases)
 canada_subregions = [sr for sr in regions['canada'].subregions.values() if sr.population]
+reference_region = SubregionData(
+    RegionSourceData(subregion='33% Daily Growth', region='',
+        data=[1.33 ** x for x in range(len(cases_data_format.dates))]), {})
+reference_region.population = 100000
 
 dates = cases_data_format.dates
 
-def plot_srs(max_len, srs):
+def plot_srs(title, xlabel, ylabel, yscale, srs, threshold_func, data_func, label_func):
     fig, ax = plt.subplots()
-    ax.set_xlabel('Days Since 1 Case Per 100,000 Confirmed')
-    ax.set_ylabel('Confirmed Cases Per 100,000')
-    ax.set_yscale('log')
-    ax.set_title('Comparison Of COVID-19 Confirmed Cases Normalized By Population')
-    ax.plot(range(max_len), [1.33 ** x for x in range(max_len)], label='33% Daily Growth')
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.set_yscale(yscale)
+    ax.set_title(title)
+
+    min_len = 3
+
+    plots_to_do = []
     for sr in srs:
-        cases = sr.cases
-        for i in range(len(cases)):
-            per_100k = cases[i] * 100000 / sr.population
-            if per_100k >= 1:
-                print('Data for %s begins at %s, with %d infected (%g per 100,000)'
-                    % (sr.subregion, dates[i], cases[i], per_100k))
-                data = [c * 100000 / sr.population for c in sr.cases[i:i + max_len]]
-                ax.plot(range(len(data)), data, label=sr.subregion)
-                break
+        start = threshold_func(sr)
+        if start != None:
+            data = data_func(sr)[start:]
+            if len(data) >= min_len:
+                plots_to_do.append((list(range(len(data))), data, label_func(sr),))
+
+    if len(plots_to_do) < 1:
+        print('No data for chart "%s"' % (title,))
+
+    # compute max_len: finds the longest series but rejecting outliers
+    # threshold for being an outlier is, >2x as long as our 75% longest series
+    # (if you order them by length -- bottom of the top quartile)
+    series_lengths = sorted([len(p[0]) for p in plots_to_do])
+    bottom_of_top_quartile = (len(series_lengths) - 1) * 3 // 4
+    max_len = max([series_lengths[i] for i in range(bottom_of_top_quartile, len(series_lengths))
+        if series_lengths[i] * 0.5 <= series_lengths[bottom_of_top_quartile]])
+
+    for p in plots_to_do:
+        ax.plot(p[0][:max_len], p[1][:max_len], label=p[2])
     ax.legend()
     plt.show()
 
-plot_srs(15, [subregions[n] for n in ['canada/british columbia', 'canada/alberta', 'canada/ontario', 'canada/quebec']])
-plot_srs(30, [subregions['canada/british columbia']] + [regions[n] for n in ['canada', 'korea, south', 'japan', 'italy', 'france', 'us', 'germany']])
+def threshold_cases_per_100k(sr, threshold):
+    cases = sr.cases
+    for i in range(len(cases)):
+        per_100k = cases[i] * 100000 / sr.population
+        if per_100k >= threshold:
+            print('Data for %s begins at %s, with %d infected (%g per 100,000)'
+                % (sr.subregion, dates[i], cases[i], per_100k))
+            return i
+    else:
+        return None
+
+def get_cases(sr):
+    return sr.cases
+
+def get_delta_cases(sr):
+    return [(sr.cases[i] - (sr.cases[i - 1] if i > 0 else 0)) * 100000 / sr.population for i in range(len(sr.cases))]
+
+def get_ongoing_cases(sr):
+    new_cases = get_delta_cases(sr)
+    return [sum(new_cases[max(0, i - 13):i + 1]) for i in range(len(new_cases))]
+
+def convert_per_100k(sr, data):
+    return [d * 100000 / sr.population for d in data]
+
+
+significant_canada_subregions = [subregions[n] for n in ['canada/british columbia', 'canada/alberta', 'canada/ontario', 'canada/quebec']]
+international_subregions = [subregions[n] for n in ['canada/british columbia', 'china/hubei']] + [regions[n] for n in ['canada', 'korea, south', 'japan', 'italy', 'france', 'us', 'germany']]
+
+plot_srs(
+    title='COVID-19 Confirmed Cases In Canada, Normalized By Population',
+    xlabel='Days Since 1 Case Per 100,000 Confirmed',
+    ylabel='Confirmed Cases Per 100,000',
+    yscale='log',
+    srs=[reference_region] + significant_canada_subregions,
+    threshold_func=lambda sr: threshold_cases_per_100k(sr, 1),
+    data_func=lambda sr: convert_per_100k(sr, get_cases(sr)),
+    label_func=lambda sr: sr.subregion)
+
+plot_srs(
+    title='COVID-19 Confirmed Cases Internationally, Normalized By Population',
+    xlabel='Days Since 1 Case Per 100,000 Confirmed',
+    ylabel='Confirmed Cases Per 100,000',
+    yscale='log',
+    srs=[reference_region] + international_subregions,
+    threshold_func=lambda sr: threshold_cases_per_100k(sr, 1),
+    data_func=lambda sr: convert_per_100k(sr, get_cases(sr)),
+    label_func=lambda sr: sr.subregion)
+
+plot_srs(
+    title='New COVID-19 Confirmed Cases In Canada, Normalized By Population',
+    xlabel='Days Since 1 Case Per 100,000 Confirmed',
+    ylabel='New Confirmed Cases Per 100,000',
+    yscale='linear',
+    srs=significant_canada_subregions,
+    threshold_func=lambda sr: threshold_cases_per_100k(sr, 1),
+    data_func=lambda sr: convert_per_100k(sr, get_delta_cases(sr)),
+    label_func=lambda sr: sr.subregion)
+
+plot_srs(
+    title='COVID-19 Cases Presumed In Treatment In Canada, Normalized By Population',
+    xlabel='Days Since Data Start',
+    ylabel='Confirmed Cases Per 100,000',
+    yscale='linear',
+    srs=significant_canada_subregions,
+    threshold_func=lambda sr: 0,
+    data_func=lambda sr: convert_per_100k(sr, get_ongoing_cases(sr)),
+    label_func=lambda sr: sr.subregion)
+
+plot_srs(
+    title='COVID-19 Cases Presumed In Treatment Internationally, Normalized By Population',
+    xlabel='Days Since 1 Case Per 100,000 Confirmed',
+    ylabel='Confirmed Cases Per 100,000',
+    yscale='linear',
+    srs=international_subregions,
+    threshold_func=lambda sr: threshold_cases_per_100k(sr, 1),
+    data_func=lambda sr: convert_per_100k(sr, get_ongoing_cases(sr)),
+    label_func=lambda sr: sr.subregion)
+
