@@ -268,7 +268,7 @@ significant_canada_subregions = [subregions[n] for n in ['canada/british columbi
 international_subregions = [subregions[n] for n in ['canada/british columbia', 'china/hubei']] + [regions[n] for n in ['canada', 'korea, south', 'japan', 'italy', 'france', 'us', 'germany']]
 
 plot_srs(
-    title='COVID-19 Confirmed Cases In Canada, Normalized By Population',
+    title='COVID-19 Confirmed Cases In Canada',
     xlabel='Days Since 1 Case Per 100,000 Confirmed',
     ylabel='Confirmed Cases Per 100,000',
     yscale='log',
@@ -278,7 +278,7 @@ plot_srs(
     label_func=lambda sr: sr.subregion)
 
 plot_srs(
-    title='COVID-19 Confirmed Cases Internationally, Normalized By Population',
+    title='COVID-19 Confirmed Cases Internationally',
     xlabel='Days Since 1 Case Per 100,000 Confirmed',
     ylabel='Confirmed Cases Per 100,000',
     yscale='log',
@@ -288,7 +288,7 @@ plot_srs(
     label_func=lambda sr: sr.subregion)
 
 plot_srs(
-    title='New COVID-19 Confirmed Cases In Canada, Normalized By Population',
+    title='New COVID-19 Confirmed Cases In Canada',
     xlabel='Days Since 1 Case Per 100,000 Confirmed',
     ylabel='New Confirmed Cases Per 100,000',
     yscale='linear',
@@ -298,9 +298,9 @@ plot_srs(
     label_func=lambda sr: sr.subregion)
 
 plot_srs(
-    title='COVID-19 Cases Presumed In Treatment In Canada, Normalized By Population',
+    title='Estimated COVID-19 Cases In Treatment In Canada',
     xlabel='Days Since Data Start',
-    ylabel='Confirmed Cases Per 100,000',
+    ylabel='Estimated Cases In Treatment Per 100,000',
     yscale='linear',
     srs=significant_canada_subregions,
     threshold_func=lambda sr: 0,
@@ -308,9 +308,9 @@ plot_srs(
     label_func=lambda sr: sr.subregion)
 
 plot_srs(
-    title='COVID-19 Cases Presumed In Treatment Internationally, Normalized By Population',
+    title='Estimated COVID-19 Cases In Treatment Internationally',
     xlabel='Days Since 1 Case Per 100,000 Confirmed',
-    ylabel='Confirmed Cases Per 100,000',
+    ylabel='Estimated Cases In Treatment Per 100,000',
     yscale='linear',
     srs=international_subregions,
     threshold_func=lambda sr: threshold_cases_per_100k(sr, 1),
