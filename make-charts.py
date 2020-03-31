@@ -254,7 +254,7 @@ def get_cases(sr):
     return sr.cases
 
 def get_delta_cases(sr):
-    return [(sr.cases[i] - (sr.cases[i - 1] if i > 0 else 0)) * 100000 / sr.population for i in range(len(sr.cases))]
+    return [(sr.cases[i] - (sr.cases[i - 1] if i > 0 else 0)) for i in range(len(sr.cases))]
 
 def get_ongoing_cases(sr):
     new_cases = get_delta_cases(sr)
