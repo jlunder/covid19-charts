@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-import sys, os, time, csv, re, datetime
+import sys, os, time, csv, re, datetime, math
 import matplotlib.pyplot as plt
 
 one_day = datetime.timedelta(days=1)
@@ -111,8 +111,8 @@ class RegionSourceData:
     def from_row(data_format, row):
         return RegionSourceData(
             data_format = data_format,
-            region = data_format.region(row),
-            subregion = data_format.subregion(row),
+            region = data_format.region(row).strip(),
+            subregion = data_format.subregion(row).strip(),
             latitude = data_format.latitude(row),
             longitude = data_format.longitude(row),
             data = data_format.data(row)
@@ -128,13 +128,20 @@ class RegionSourceData:
 
 
 class SubregionData:
-    def __init__(self, source_cases, population_data):
+    deaths = None
+    recovered = None
+
+    def __init__(self, source_cases, source_deaths, source_recovered, population_data):
         self.name = '%s/%s' % (source_cases.region.lower(), source_cases.subregion.lower(),)
         self.region = source_cases.region
         self.subregion = source_cases.subregion
         self.latitude = source_cases.latitude
         self.longitude = source_cases.longitude
         self.cases = source_cases.data
+        if source_deaths:
+            self.deaths = source_deaths.data
+        if source_recovered:
+            self.recovered = source_recovered.data
         fq_subregion = self.name.lower()
         if fq_subregion in population_data:
             self.population = population_data[fq_subregion]
@@ -143,12 +150,19 @@ class SubregionData:
 
 
 class RegionData:
+    deaths = None
+    recovered = None
+
     def __init__(self, region, subregions, population_data):
         self.name = region.lower()
         self.region = region
         self.subregion = region
         self.subregions = dict([(sr.name, sr,) for sr in subregions])
-        self.cases = [sum([(rs.cases[i] or 0) for rs in subregions]) for i in range(len(subregions[0].cases))]
+        self.cases = [sum(sr.cases[i] for sr in subregions) for i in range(len(subregions[0].cases))]
+        if all(sr.deaths for sr in subregions):
+            self.deaths = [sum(sr.deaths[i] for sr in subregions) for i in range(len(subregions[0].cases))]
+        if all(sr.recovered for sr in subregions):
+            self.recovered = [sum(sr.recovered[i] for sr in subregions) for i in range(len(subregions[0].cases))]
         fq_region = self.region.lower()
         if fq_region in population_data:
             self.population = population_data[fq_region]
@@ -185,26 +199,44 @@ def extract_regions(subregions):
     return regions
 
 
-def merge_data(subregion_cases):
+def merge_data(subregion_cases, subregion_deaths, subregion_recovered):
+    def get_source_fq(source):
+        norm_fq_region = source.region.lower()
+        if source.subregion:
+            norm_fq_region += '/' + source.subregion.lower()
+        return norm_fq_region
+
     subregions = {}
+    subregion_cases_names = {}
+
+    for source in subregion_cases:
+        subregion_cases_names[get_source_fq(source)] = None
+    indexed_deaths = {}
+    indexed_recovered = {}
+    for source in subregion_deaths:
+        fq = get_source_fq(source)
+        if fq in subregion_cases_names:
+            if fq in indexed_deaths:
+                print('Dup subregion %s in deaths data' % (fq,))
+            indexed_deaths[fq] = source
+    for source in subregion_recovered:
+        fq = get_source_fq(source)
+        if fq in subregion_cases_names:
+            if fq in indexed_recovered:
+                print('Dup subregion %s in deaths data' % (fq,))
+            indexed_recovered[fq] = source
     for source_cases in subregion_cases:
-        sr = SubregionData(source_cases, region_populations)
+        fq = get_source_fq(source_cases)
+        source_deaths = indexed_deaths[fq] if fq in indexed_deaths else None
+        source_recovered = indexed_recovered[fq] if fq in indexed_recovered else None
+        if fq == 'canada/british columbia':
+            print('bc:', source_deaths.data)
+        sr = SubregionData(source_cases, source_deaths, source_recovered, region_populations)
         subregions[sr.name] = sr
     return subregions, extract_regions(subregions.values())
 
 
 # Main script begins here
-
-cases_data_format, subregion_cases = \
-    read_data('COVID-19/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv')
-subregions, regions = merge_data(subregion_cases)
-canada_subregions = [sr for sr in regions['canada'].subregions.values() if sr.population]
-reference_region = SubregionData(
-    RegionSourceData(subregion='33% Daily Growth', region='',
-        data=[1.33 ** x for x in range(len(cases_data_format.dates))]), {})
-reference_region.population = 100000
-
-dates = cases_data_format.dates
 
 def plot_srs(title, xlabel, ylabel, yscale, srs, threshold_func, data_func, label_func):
     fig, ax = plt.subplots()
@@ -239,81 +271,264 @@ def plot_srs(title, xlabel, ylabel, yscale, srs, threshold_func, data_func, labe
     ax.legend()
     plt.show()
 
+def plot_compare(title, xlabel, ylabel, yscale, srs, threshold_func, data_funcs, label_funcs):
+    fig, ax = plt.subplots()
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.set_yscale(yscale)
+    ax.set_title(title)
+    for sr in srs:
+        start = threshold_func(sr)
+        if start != None:
+            for i in range(len(data_funcs)):
+                data = data_funcs[i](sr)[start:]
+                ax.plot(range(max(0, len(data) - start)), data[start:], label=label_funcs[i](sr))
+    ax.legend()
+    plt.show()
+
+
+nominal_growth = 1.33
+nominal_death_rate = 0.016
+nominal_death_days = 18
+nominal_confirm_days = 3
+
+
 def threshold_cases_per_100k(sr, threshold):
     cases = sr.cases
     for i in range(len(cases)):
         per_100k = cases[i] * 100000 / sr.population
         if per_100k >= threshold:
-            print('Data for %s begins at %s, with %d infected (%g per 100,000)'
-                % (sr.subregion, dates[i], cases[i], per_100k))
+            #print('Data for %s begins at %s, with %d infected (%g per 100,000)'
+            #    % (sr.subregion, dates[i], cases[i], per_100k))
             return i
     else:
         return None
 
-def get_cases(sr):
+def get_delta(data):
+    return [(data[i] - (data[i - 1] if i > 0 else 0)) for i in range(len(data))]
+
+def get_confirmed_cases(sr):
     return sr.cases
 
-def get_delta_cases(sr):
-    return [(sr.cases[i] - (sr.cases[i - 1] if i > 0 else 0)) for i in range(len(sr.cases))]
+def get_projected_ongoing_confirmed_cases(sr):
+    new_cases = get_delta(get_confirmed_cases(sr))
+    return [sum(new_cases[max(0, i - nominal_death_days):i + 1]) for i in range(len(new_cases))]
 
-def get_ongoing_cases(sr):
-    new_cases = get_delta_cases(sr)
-    return [sum(new_cases[max(0, i - 13):i + 1]) for i in range(len(new_cases))]
+def get_ongoing_confirmed_cases(sr):
+    if sr.deaths and sr.recovered:
+        return [sr.cases[i] - (sr.deaths[i] + sr.recovered[i]) for i in range(len(sr.cases))]
+    else:
+        return get_projected_ongoing_confirmed_cases(sr)
+
+def get_projected_cases(sr, nominal_death_days=nominal_death_days, nominal_confirm_days=nominal_death_days):
+    days_diff = nominal_death_days - nominal_confirm_days
+    return [sr.deaths[i + days_diff] / nominal_death_rate for i in range(len(sr.deaths) - days_diff)]
+
+def get_deaths(sr):
+    if sr.deaths:
+        return sr.deaths
+    else:
+        new_cases = get_delta(get_confirmed_cases(sr))
+        return [sum(new_cases[max(0, i - nominal_death_days):i + 1]) for i in range(len(new_cases))]
 
 def convert_per_100k(sr, data):
     return [d * 100000 / sr.population for d in data]
 
 
+cases_data_format, subregion_cases = \
+    read_data('COVID-19/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv')
+deaths_data_format, subregion_deaths = \
+    read_data('COVID-19/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_global.csv')
+recovered_data_format, subregion_recovered = \
+    read_data('COVID-19/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_recovered_global.csv')
+subregions, regions = merge_data(subregion_cases, subregion_deaths, subregion_recovered)
+canada_subregions = [sr for sr in regions['canada'].subregions.values() if sr.population]
+
+reference_region = SubregionData(
+    RegionSourceData(subregion='33% Daily Growth', region='',
+        data=[nominal_growth ** x for x in range(len(cases_data_format.dates))]),
+    RegionSourceData(subregion='33% Daily Growth', region='',
+        data=[nominal_death_rate * nominal_growth ** (x - 14) for x in range(len(cases_data_format.dates))]),
+    RegionSourceData(subregion='33% Daily Growth', region='',
+        data=[(1 - nominal_death_rate) * nominal_growth ** (x - 14) for x in range(len(cases_data_format.dates))]),
+    {}
+    )
+reference_region.population = 100000
+
+dates = cases_data_format.dates
+
 significant_canada_subregions = [subregions[n] for n in ['canada/british columbia', 'canada/alberta', 'canada/ontario', 'canada/quebec']]
 international_subregions = [subregions[n] for n in ['canada/british columbia', 'china/hubei']] + [regions[n] for n in ['canada', 'korea, south', 'japan', 'italy', 'france', 'us', 'germany']]
 
-plot_srs(
-    title='COVID-19 Confirmed Cases In Canada',
-    xlabel='Days Since 1 Case Per 100,000 Confirmed',
-    ylabel='Confirmed Cases Per 100,000',
-    yscale='log',
-    srs=[reference_region] + significant_canada_subregions,
-    threshold_func=lambda sr: threshold_cases_per_100k(sr, 1),
-    data_func=lambda sr: convert_per_100k(sr, get_cases(sr)),
-    label_func=lambda sr: sr.subregion)
+if True:
+    plot_srs(
+        title='COVID-19 Confirmed Cases In Canada',
+        xlabel='Days Since 1 Case Per 100,000 Confirmed',
+        ylabel='Confirmed Cases Per 100,000',
+        yscale='log',
+        srs=[reference_region] + significant_canada_subregions,
+        threshold_func=lambda sr: threshold_cases_per_100k(sr, 1),
+        data_func=lambda sr: convert_per_100k(sr, get_confirmed_cases(sr)),
+        label_func=lambda sr: sr.subregion)
 
-plot_srs(
-    title='COVID-19 Confirmed Cases Internationally',
-    xlabel='Days Since 1 Case Per 100,000 Confirmed',
-    ylabel='Confirmed Cases Per 100,000',
-    yscale='log',
-    srs=[reference_region] + international_subregions,
-    threshold_func=lambda sr: threshold_cases_per_100k(sr, 1),
-    data_func=lambda sr: convert_per_100k(sr, get_cases(sr)),
-    label_func=lambda sr: sr.subregion)
+if False:
+    plot_srs(
+        title='COVID-19 Confirmed Cases Internationally',
+        xlabel='Days Since 1 Case Per 100,000 Confirmed',
+        ylabel='Confirmed Cases Per 100,000',
+        yscale='log',
+        srs=[reference_region] + international_subregions,
+        threshold_func=lambda sr: threshold_cases_per_100k(sr, 1),
+        data_func=lambda sr: convert_per_100k(sr, get_confirmed_cases(sr)),
+        label_func=lambda sr: sr.subregion)
 
-plot_srs(
-    title='New COVID-19 Confirmed Cases In Canada',
-    xlabel='Days Since 1 Case Per 100,000 Confirmed',
-    ylabel='New Confirmed Cases Per 100,000',
-    yscale='linear',
-    srs=significant_canada_subregions,
-    threshold_func=lambda sr: threshold_cases_per_100k(sr, 1),
-    data_func=lambda sr: convert_per_100k(sr, get_delta_cases(sr)),
-    label_func=lambda sr: sr.subregion)
+if False:
+    plot_srs(
+        title='New COVID-19 Confirmed Cases In Canada',
+        xlabel='Days Since 1 Case Per 100,000 Confirmed',
+        ylabel='New Confirmed Cases Per 100,000',
+        yscale='linear',
+        srs=significant_canada_subregions,
+        threshold_func=lambda sr: threshold_cases_per_100k(sr, 1),
+        data_func=lambda sr: convert_per_100k(sr, get_delta(get_confirmed_cases(sr))),
+        label_func=lambda sr: sr.subregion)
 
-plot_srs(
-    title='Estimated COVID-19 Cases In Treatment In Canada',
-    xlabel='Days Since Data Start',
-    ylabel='Estimated Cases In Treatment Per 100,000',
-    yscale='linear',
-    srs=significant_canada_subregions,
-    threshold_func=lambda sr: 0,
-    data_func=lambda sr: convert_per_100k(sr, get_ongoing_cases(sr)),
-    label_func=lambda sr: sr.subregion)
+if False:
+    plot_srs(
+        title='COVID-19 Cases In Treatment In Canada',
+        xlabel='Days Since ' + str(dates[0]),
+        ylabel='Cases In Treatment Per 100,000',
+        yscale='linear',
+        srs=significant_canada_subregions,
+        threshold_func=lambda sr: 0,
+        data_func=lambda sr: convert_per_100k(sr, get_ongoing_confirmed_cases(sr)),
+        label_func=lambda sr: sr.subregion)
 
-plot_srs(
-    title='Estimated COVID-19 Cases In Treatment Internationally',
-    xlabel='Days Since 1 Case Per 100,000 Confirmed',
-    ylabel='Estimated Cases In Treatment Per 100,000',
-    yscale='linear',
-    srs=international_subregions,
-    threshold_func=lambda sr: threshold_cases_per_100k(sr, 1),
-    data_func=lambda sr: convert_per_100k(sr, get_ongoing_cases(sr)),
-    label_func=lambda sr: sr.subregion)
+if False:
+    plot_srs(
+        title='COVID-19 Cases In Treatment Internationally',
+        xlabel='Days Since 1 Case Per 100,000 Confirmed',
+        ylabel='Cases In Treatment Per 100,000',
+        yscale='linear',
+        srs=international_subregions,
+        threshold_func=lambda sr: threshold_cases_per_100k(sr, 1),
+        data_func=lambda sr: convert_per_100k(sr, get_ongoing_confirmed_cases(sr)),
+        label_func=lambda sr: sr.subregion)
 
+if False:
+    plot_srs(
+        title='Deaths From COVID-19 In Canada',
+        xlabel='Days Since ' + str(dates[0]),
+        ylabel='Deaths Per 100,000',
+        yscale='log',
+        srs=significant_canada_subregions,
+        threshold_func=lambda sr: 0,
+        data_func=lambda sr: convert_per_100k(sr, get_deaths(sr)),
+        label_func=lambda sr: sr.subregion)
+
+if False:
+    plot_srs(
+        title='Estimated Actual COVID-19 Cases In Canada',
+        xlabel='Days Since 1 Case Per 100,000 Estimated',
+        ylabel='Estimated Cases Per 100,000',
+        yscale='log',
+        srs=[reference_region] + significant_canada_subregions,
+        threshold_func=lambda sr: threshold_cases_per_100k(sr, 1),
+        data_func=lambda sr: convert_per_100k(sr, get_projected_cases(sr)),
+        label_func=lambda sr: sr.subregion)
+
+if False:
+    plot_srs(
+        title='Estimated Actual COVID-19 Cases Internationally',
+        xlabel='Days Since 1 Case Per 100,000 Estimated',
+        ylabel='Estimated Cases Per 100,000',
+        yscale='log',
+        srs=[reference_region] + international_subregions,
+        threshold_func=lambda sr: threshold_cases_per_100k(sr, 1),
+        data_func=lambda sr: convert_per_100k(sr, get_projected_cases(sr)),
+        label_func=lambda sr: sr.subregion)
+
+if False:
+    plot_srs(
+        title='Estimated Actual COVID-19 Cases Internationally',
+        xlabel='Days Since 1 Case Per 100,000 Estimated',
+        ylabel='Estimated Cases Per 100,000',
+        yscale='log',
+        srs=[reference_region] + international_subregions,
+        threshold_func=lambda sr: threshold_cases_per_100k(sr, 1),
+        data_func=lambda sr: convert_per_100k(sr, get_projected_cases(sr)),
+        label_func=lambda sr: sr.subregion)
+
+if True:
+    plot_compare(
+        title='Comparison Of Estimated Vs. Confirmed Cases',
+        xlabel='Days Since 1 Case Per 100,000 Confirmed',
+        ylabel='Estimated Cases Per 100,000',
+        yscale='log',
+        srs=[subregions['canada/british columbia']],#international_subregions,
+        threshold_func=lambda sr: 0,
+        data_funcs=[
+            lambda sr: convert_per_100k(sr, get_confirmed_cases(sr)),
+            lambda sr: convert_per_100k(sr, get_projected_cases(sr)),
+        ],
+        label_funcs=[
+            lambda sr: sr.subregion + ' (confirmed)',
+            lambda sr: sr.subregion + ' (projected)',
+        ])
+
+if False:
+    plot_srs(
+        title='Comparison Of Estimated Vs. Confirmed Cases In Canada',
+        xlabel='Days Since ' + str(dates[0]),
+        ylabel='Estimated Actual Cases / Confirmed Cases',
+        yscale='log',
+        srs=significant_canada_subregions,
+        threshold_func=lambda sr: 0,
+        data_func=lambda sr: list(map(lambda c, p: c / p if p else 1, get_confirmed_cases(sr), get_projected_cases(sr))),
+        label_func=lambda sr: sr.subregion)
+
+if True:
+    plot_srs(
+        title='Comparison Of Estimated Vs. Confirmed Cases Internationally',
+        xlabel='Days Since ' + str(dates[0]),
+        ylabel='Estimated Actual Cases / Confirmed Cases',
+        yscale='log',
+        srs=international_subregions,
+        threshold_func=lambda sr: 0,
+        data_func=lambda sr: list(map(lambda c, p: p / c if c else 1, get_confirmed_cases(sr), get_projected_cases(sr))),
+        label_func=lambda sr: sr.subregion)
+
+if True:
+    fig, ax = plt.subplots()
+    ax.set_xlabel('Days Between Contraction And Detection')
+    ax.set_ylabel('RMS Of Overall Difference')
+    ax.set_yscale('linear')
+    ax.set_title('Fit Of Confirmed To Projected Cases')
+    for sr in canada_subregions + international_subregions:
+        base_confirmed_cases = get_confirmed_cases(sr)
+
+        for i in range(len(base_confirmed_cases)):
+            if base_confirmed_cases[i] > 0:
+                start = i
+                break
+        else:
+            start = -1
+
+        xs = []
+        ys = []
+        for i in range(21):
+            base_projected_cases = get_projected_cases(sr, nominal_confirm_days=i)
+            if start >= 0 and start < len(base_projected_cases):
+                projected_cases = base_projected_cases[start:]
+                confirmed_cases = base_confirmed_cases[start:len(base_projected_cases)]
+                avg_projected = sum(projected_cases) / len(projected_cases)
+                avg_confirmed = sum(confirmed_cases) / len(confirmed_cases)
+                xs.append(i)
+                ys.append(avg_projected / avg_confirmed)
+
+#                ys.append(math.sqrt(sum(map(lambda d: (d[0] - d[1]) ** 2,
+#                    zip((p / avg_projected for p in projected_cases),
+#                        (c / avg_confirmed for c in confirmed_cases))))))
+        ax.plot(xs, ys, label=sr.subregion)
+    ax.legend()
+    plt.show()
