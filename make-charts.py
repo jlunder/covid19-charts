@@ -320,7 +320,7 @@ def get_ongoing_confirmed_cases(sr):
     else:
         return get_projected_ongoing_confirmed_cases(sr)
 
-def get_projected_cases(sr, nominal_death_days=nominal_death_days, nominal_confirm_days=nominal_death_days):
+def get_projected_cases(sr, nominal_death_days=nominal_death_days, nominal_confirm_days=nominal_confirm_days):
     days_diff = nominal_death_days - nominal_confirm_days
     return [sr.deaths[i + days_diff] / nominal_death_rate for i in range(len(sr.deaths) - days_diff)]
 
@@ -426,7 +426,7 @@ if False:
         data_func=lambda sr: convert_per_100k(sr, get_deaths(sr)),
         label_func=lambda sr: sr.subregion)
 
-if False:
+if True:
     plot_srs(
         title='Estimated Actual COVID-19 Cases In Canada',
         xlabel='Days Since 1 Case Per 100,000 Estimated',
@@ -498,21 +498,20 @@ if True:
         data_func=lambda sr: list(map(lambda c, p: p / c if c else 1, get_confirmed_cases(sr), get_projected_cases(sr))),
         label_func=lambda sr: sr.subregion)
 
-if True:
+if False:
     fig, ax = plt.subplots()
     ax.set_xlabel('Days Between Contraction And Detection')
     ax.set_ylabel('RMS Of Overall Difference')
     ax.set_yscale('linear')
     ax.set_title('Fit Of Confirmed To Projected Cases')
-    for sr in canada_subregions + international_subregions:
+    for sr in significant_canada_subregions + international_subregions:
         base_confirmed_cases = get_confirmed_cases(sr)
 
+        start = -1
         for i in range(len(base_confirmed_cases)):
             if base_confirmed_cases[i] > 0:
                 start = i
                 break
-        else:
-            start = -1
 
         xs = []
         ys = []
@@ -521,14 +520,14 @@ if True:
             if start >= 0 and start < len(base_projected_cases):
                 projected_cases = base_projected_cases[start:]
                 confirmed_cases = base_confirmed_cases[start:len(base_projected_cases)]
-                avg_projected = sum(projected_cases) / len(projected_cases)
-                avg_confirmed = sum(confirmed_cases) / len(confirmed_cases)
+                avg_projected = sum(projected_cases) / len(projected_cases) or 1
+                avg_confirmed = sum(confirmed_cases) / len(confirmed_cases) or 1
                 xs.append(i)
-                ys.append(avg_projected / avg_confirmed)
+                #ys.append(avg_projected / avg_confirmed)
 
-#                ys.append(math.sqrt(sum(map(lambda d: (d[0] - d[1]) ** 2,
-#                    zip((p / avg_projected for p in projected_cases),
-#                        (c / avg_confirmed for c in confirmed_cases))))))
+                ys.append(math.sqrt(sum(map(lambda d: (d[0] - d[1]) ** 2,
+                    zip((p / avg_projected for p in projected_cases),
+                        (c / avg_confirmed for c in confirmed_cases))))))
         ax.plot(xs, ys, label=sr.subregion)
     ax.legend()
     plt.show()
