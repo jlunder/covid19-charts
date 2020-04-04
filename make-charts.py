@@ -289,8 +289,8 @@ def plot_compare(title, xlabel, ylabel, yscale, srs, threshold_func, data_funcs,
 
 nominal_growth = 1.33
 nominal_death_rate = 0.016
-nominal_death_days = 18
-nominal_confirm_days = 3
+nominal_confirm_to_death = 14
+nominal_recovery = 18
 default_smooth = 6
 
 
@@ -317,7 +317,7 @@ def get_confirmed_cases(sr):
 
 def get_estimated_ongoing_confirmed_cases(sr):
     new_cases = convert_delta(get_confirmed_cases(sr))
-    return [sum(new_cases[max(0, i - nominal_death_days):i + 1]) for i in range(len(new_cases))]
+    return [sum(new_cases[max(0, i - nominal_confirm_to_death):i + 1]) for i in range(len(new_cases))]
 
 def get_ongoing_confirmed_cases(sr):
     if sr.deaths and sr.recovered:
@@ -325,12 +325,11 @@ def get_ongoing_confirmed_cases(sr):
     else:
         return get_estimated_ongoing_confirmed_cases(sr)
 
-def get_deaths_estimated_cases(sr, nominal_death_days=nominal_death_days, nominal_confirm_days=nominal_confirm_days):
-    days_diff = nominal_death_days - nominal_confirm_days
-    return [sr.deaths[i + days_diff] / nominal_death_rate for i in range(max(len(sr.deaths) - days_diff, 0))]
+def get_deaths_estimated_cases(sr, confirm_to_death=nominal_confirm_to_death):
+    return [sr.deaths[i + confirm_to_death] / nominal_death_rate for i in range(max(len(sr.deaths) - confirm_to_death, 0))]
 
-def get_estimated_cases(sr, nominal_death_days=nominal_death_days, nominal_confirm_days=nominal_confirm_days):
-    deaths_estimated_cases = get_deaths_estimated_cases(sr, nominal_death_days, nominal_confirm_days)
+def get_estimated_cases(sr, confirm_to_death=nominal_confirm_to_death):
+    deaths_estimated_cases = get_deaths_estimated_cases(sr, confirm_to_death)
     confirmed_sum = sum(get_confirmed_cases(sr)[:len(deaths_estimated_cases)])
     estimated_sum = sum(deaths_estimated_cases)
     if confirmed_sum > 0 and estimated_sum > 0:
@@ -340,7 +339,7 @@ def get_estimated_cases(sr, nominal_death_days=nominal_death_days, nominal_confi
 
 def get_ongoing_estimated_cases(sr):
     new_cases = convert_delta(get_estimated_cases(sr))
-    return [sum(new_cases[max(0, i - nominal_death_days):i + 1]) for i in range(len(new_cases))]
+    return [sum(new_cases[max(0, i - nominal_confirm_to_death):i + 1]) for i in range(len(new_cases))]
 
 def get_deaths(sr):
     if sr.deaths:
@@ -510,7 +509,7 @@ if True:
     ax.set_ylabel('RMS Of Overall Difference')
     ax.set_yscale('linear')
     ax.set_title('Fit Of Confirmed To Estimated Cases')
-    for sr in significant_canada_subregions + international_subregions:
+    for sr in significant_canada_subregions:# + international_subregions:
         base_confirmed_cases = convert_smooth(get_confirmed_cases(sr), default_smooth)
 
         start = -1
@@ -521,8 +520,8 @@ if True:
 
         xs = []
         ys = []
-        for i in range(21):
-            base_estimated_cases = convert_smooth(get_deaths_estimated_cases(sr, nominal_confirm_days=i), default_smooth)
+        for i in range(30):
+            base_estimated_cases = convert_smooth(get_deaths_estimated_cases(sr, confirm_to_death=i), default_smooth)
             if start >= 0 and start < len(base_estimated_cases):
                 estimated_cases = base_estimated_cases[start:]
                 confirmed_cases = base_confirmed_cases[start:len(base_estimated_cases)]
@@ -542,7 +541,7 @@ if True:
     fig, ax = plt.subplots()
     ax.set_xlabel('Ongoing Cases Per 100,000')
     ax.set_xscale('log')
-    ax.set_ylabel('New Cases Per 100,000')
+    ax.set_ylabel('New Cases Per Recovery Time Per 100,000')
     ax.set_yscale('log')
     ax.set_title('New Cases For Existing Cases In Canada')
     max_new = 0
@@ -551,12 +550,12 @@ if True:
         estimated_cases = convert_per_100k(sr, convert_smooth(get_estimated_cases(sr), default_smooth))
         start = threshold(estimated_cases, 1)
         if start != None and start < len(estimated_cases):
-            new_cases = convert_delta(estimated_cases)[start:]
+            new_cases = [d * nominal_recovery for d in convert_delta(estimated_cases)[start:]]
             ongoing_cases = convert_per_100k(sr, convert_smooth(get_ongoing_estimated_cases(sr), default_smooth)[start:])
             max_new = max(max_new, max(new_cases))
             max_ongoing = max(max_ongoing, max(ongoing_cases))
             ax.plot(ongoing_cases, new_cases, label=sr.subregion)
     max_series = [1, max(max_new, max_ongoing)]
-    ax.plot(max_series, max_series, label='Danger!')
+    ax.plot(max_series, max_series, label='Danger <-> Relax')
     ax.legend()
     plt.show()
