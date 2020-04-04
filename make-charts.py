@@ -291,6 +291,7 @@ nominal_growth = 1.33
 nominal_death_rate = 0.016
 nominal_death_days = 18
 nominal_confirm_days = 3
+default_smooth = 6
 
 
 def convert_delta(data):
@@ -314,7 +315,7 @@ def threshold(data, val):
 def get_confirmed_cases(sr):
     return sr.cases
 
-def get_projected_ongoing_confirmed_cases(sr):
+def get_estimated_ongoing_confirmed_cases(sr):
     new_cases = convert_delta(get_confirmed_cases(sr))
     return [sum(new_cases[max(0, i - nominal_death_days):i + 1]) for i in range(len(new_cases))]
 
@@ -322,17 +323,24 @@ def get_ongoing_confirmed_cases(sr):
     if sr.deaths and sr.recovered:
         return [sr.cases[i] - (sr.deaths[i] + sr.recovered[i]) for i in range(len(sr.cases))]
     else:
-        return get_projected_ongoing_confirmed_cases(sr)
+        return get_estimated_ongoing_confirmed_cases(sr)
 
-def get_projected_cases(sr, nominal_death_days=nominal_death_days, nominal_confirm_days=nominal_confirm_days):
+def get_deaths_estimated_cases(sr, nominal_death_days=nominal_death_days, nominal_confirm_days=nominal_confirm_days):
     days_diff = nominal_death_days - nominal_confirm_days
-    projected_cases = [sr.deaths[i + days_diff] / nominal_death_rate for i in range(max(len(sr.deaths) - days_diff, 0))]
-    avg_len = min(len(projected_cases), 6)
-    if avg_len > 0:
-        factor = sum(projected_cases[-avg_len:]) / sum(sr.cases[-(days_diff + avg_len):-days_diff])
+    return [sr.deaths[i + days_diff] / nominal_death_rate for i in range(max(len(sr.deaths) - days_diff, 0))]
+
+def get_estimated_cases(sr, nominal_death_days=nominal_death_days, nominal_confirm_days=nominal_confirm_days):
+    deaths_estimated_cases = get_deaths_estimated_cases(sr, nominal_death_days, nominal_confirm_days)
+    confirmed_sum = sum(get_confirmed_cases(sr)[:len(deaths_estimated_cases)])
+    estimated_sum = sum(deaths_estimated_cases)
+    if confirmed_sum > 0 and estimated_sum > 0:
+        return [c * estimated_sum / confirmed_sum for c in sr.cases]
     else:
-        factor = 1
-    return projected_cases + [c * factor for c in sr.cases[-days_diff:]]
+        return cases
+
+def get_ongoing_estimated_cases(sr):
+    new_cases = convert_delta(get_estimated_cases(sr))
+    return [sum(new_cases[max(0, i - nominal_death_days):i + 1]) for i in range(len(new_cases))]
 
 def get_deaths(sr):
     if sr.deaths:
@@ -397,27 +405,17 @@ if True:
         ylabel='New Confirmed Cases Per 100,000',
         srs=significant_canada_subregions,
         threshold_func=lambda sr: threshold_cases_per_100k(sr, 1),
-        data_func=lambda sr: convert_per_100k(sr, convert_delta(convert_smooth(get_confirmed_cases(sr), 6))),
-        label_func=lambda sr: sr.subregion)
-
-if True:
-    plot_srs(
-        title='New COVID-19 Confirmed Cases In Canada',
-        xlabel='Days Since 1 Case Per 100,000 Confirmed',
-        ylabel='New Confirmed Cases Per 100,000',
-        srs=significant_canada_subregions,
-        threshold_func=lambda sr: threshold_cases_per_100k(sr, 1),
-        data_func=lambda sr: convert_per_100k(sr, convert_delta(convert_smooth(get_confirmed_cases(sr), 6))),
+        data_func=lambda sr: convert_per_100k(sr, convert_delta(convert_smooth(get_confirmed_cases(sr), default_smooth))),
         label_func=lambda sr: sr.subregion)
 
 if True:
     plot_srs(
         title='COVID-19 Cases In Treatment In Canada',
-        xlabel='Days Since ' + str(dates[0]),
+        xlabel='Days Since ' + str(dates[40]),
         ylabel='Cases In Treatment Per 100,000',
         srs=significant_canada_subregions,
         threshold_func=lambda sr: 0,
-        data_func=lambda sr: convert_per_100k(sr, get_ongoing_confirmed_cases(sr)),
+        data_func=lambda sr: convert_per_100k(sr, get_ongoing_confirmed_cases(sr))[40:],
         label_func=lambda sr: sr.subregion)
 
 if False:
@@ -433,11 +431,11 @@ if False:
 if False:
     plot_srs(
         title='Deaths From COVID-19 In Canada',
-        xlabel='Days Since ' + str(dates[0]),
+        xlabel='Days Since ' + str(dates[40]),
         ylabel='Deaths Per 100,000',
         srs=significant_canada_subregions,
         threshold_func=lambda sr: 0,
-        data_func=lambda sr: convert_per_100k(sr, get_deaths(sr)),
+        data_func=lambda sr: convert_per_100k(sr, get_deaths(sr))[40:],
         label_func=lambda sr: sr.subregion)
 
 if True:
@@ -446,8 +444,8 @@ if True:
         xlabel='Days Since 1 Case Per 100,000 Estimated',
         ylabel='Estimated Cases Per 100,000',
         srs=[reference_region] + significant_canada_subregions,
-        threshold_func=lambda sr: threshold(convert_per_100k(sr, get_projected_cases(sr)), 1),
-        data_func=lambda sr: convert_per_100k(sr, get_projected_cases(sr)),
+        threshold_func=lambda sr: threshold(convert_per_100k(sr, get_estimated_cases(sr)), 1),
+        data_func=lambda sr: convert_per_100k(sr, get_estimated_cases(sr)),
         label_func=lambda sr: sr.subregion)
 
 if False:
@@ -457,7 +455,7 @@ if False:
         ylabel='Estimated Cases Per 100,000',
         srs=[reference_region] + international_subregions,
         threshold_func=lambda sr: threshold_cases_per_100k(sr, 1),
-        data_func=lambda sr: convert_per_100k(sr, get_projected_cases(sr)),
+        data_func=lambda sr: convert_per_100k(sr, get_estimated_cases(sr)),
         label_func=lambda sr: sr.subregion)
 
 if False:
@@ -467,7 +465,7 @@ if False:
         ylabel='Estimated Cases Per 100,000',
         srs=[reference_region] + international_subregions,
         threshold_func=lambda sr: threshold_cases_per_100k(sr, 1),
-        data_func=lambda sr: convert_per_100k(sr, get_projected_cases(sr)),
+        data_func=lambda sr: convert_per_100k(sr, get_estimated_cases(sr)),
         label_func=lambda sr: sr.subregion)
 
 if False:
@@ -479,62 +477,62 @@ if False:
         threshold_func=lambda sr: 0,
         data_funcs=[
             lambda sr: convert_per_100k(sr, get_confirmed_cases(sr)),
-            lambda sr: convert_per_100k(sr, get_projected_cases(sr)),
+            lambda sr: convert_per_100k(sr, get_estimated_cases(sr)),
         ],
         label_funcs=[
             lambda sr: sr.subregion + ' (confirmed)',
-            lambda sr: sr.subregion + ' (projected)',
+            lambda sr: sr.subregion + ' (estimated)',
         ])
 
 if False:
     plot_srs(
         title='Comparison Of Estimated Vs. Confirmed Cases In Canada',
-        xlabel='Days Since ' + str(dates[0]),
+        xlabel='Days Since ' + str(dates[40]),
         ylabel='Estimated Actual Cases / Confirmed Cases',
         srs=significant_canada_subregions,
         threshold_func=lambda sr: 0,
-        data_func=lambda sr: list(map(lambda c, p: c / p if p else 1, get_confirmed_cases(sr), get_projected_cases(sr))),
+        data_func=lambda sr: list(map(lambda c, p: c / p if p else 1, get_confirmed_cases(sr), get_estimated_cases(sr)))[40:],
         label_func=lambda sr: sr.subregion)
 
 if False:
     plot_srs(
         title='Comparison Of Estimated Vs. Confirmed Cases Internationally',
-        xlabel='Days Since ' + str(dates[0]),
+        xlabel='Days Since ' + str(dates[40]),
         ylabel='Estimated Actual Cases / Confirmed Cases',
         srs=international_subregions,
         threshold_func=lambda sr: 0,
-        data_func=lambda sr: list(map(lambda c, p: p / c if c else 1, get_confirmed_cases(sr), get_projected_cases(sr))),
+        data_func=lambda sr: list(map(lambda c, p: p / c if c else 1, get_confirmed_cases(sr), get_estimated_cases(sr)))[40:],
         label_func=lambda sr: sr.subregion)
 
-if False:
+if True:
     fig, ax = plt.subplots()
     ax.set_xlabel('Days Between Contraction And Detection')
     ax.set_ylabel('RMS Of Overall Difference')
     ax.set_yscale('linear')
-    ax.set_title('Fit Of Confirmed To Projected Cases')
+    ax.set_title('Fit Of Confirmed To Estimated Cases')
     for sr in significant_canada_subregions + international_subregions:
-        base_confirmed_cases = get_confirmed_cases(sr)
+        base_confirmed_cases = convert_smooth(get_confirmed_cases(sr), default_smooth)
 
         start = -1
         for i in range(len(base_confirmed_cases)):
-            if base_confirmed_cases[i] > 0:
+            if base_confirmed_cases[i] > 100:
                 start = i
                 break
 
         xs = []
         ys = []
         for i in range(21):
-            base_projected_cases = get_projected_cases(sr, nominal_confirm_days=i)
-            if start >= 0 and start < len(base_projected_cases):
-                projected_cases = base_projected_cases[start:]
-                confirmed_cases = base_confirmed_cases[start:len(base_projected_cases)]
-                avg_projected = sum(projected_cases) / len(projected_cases) or 1
+            base_estimated_cases = convert_smooth(get_deaths_estimated_cases(sr, nominal_confirm_days=i), default_smooth)
+            if start >= 0 and start < len(base_estimated_cases):
+                estimated_cases = base_estimated_cases[start:]
+                confirmed_cases = base_confirmed_cases[start:len(base_estimated_cases)]
+                avg_estimated = sum(estimated_cases) / len(estimated_cases) or 1
                 avg_confirmed = sum(confirmed_cases) / len(confirmed_cases) or 1
                 xs.append(i)
-                #ys.append(avg_projected / avg_confirmed)
+                #ys.append(avg_estimated / avg_confirmed)
 
                 ys.append(math.sqrt(sum(map(lambda d: (d[0] - d[1]) ** 2,
-                    zip((p / avg_projected for p in projected_cases),
+                    zip((p / avg_estimated for p in estimated_cases),
                         (c / avg_confirmed for c in confirmed_cases))))))
         ax.plot(xs, ys, label=sr.subregion)
     ax.legend()
@@ -542,23 +540,23 @@ if False:
 
 if True:
     fig, ax = plt.subplots()
-    ax.set_xlabel('Ongoing Cases')
+    ax.set_xlabel('Ongoing Cases Per 100,000')
     ax.set_xscale('log')
-    ax.set_ylabel('New Cases')
+    ax.set_ylabel('New Cases Per 100,000')
     ax.set_yscale('log')
     ax.set_title('New Cases For Existing Cases In Canada')
     max_new = 0
     max_ongoing = 0
     for sr in significant_canada_subregions:# + international_subregions:
-        projected_cases = get_projected_cases(sr)
-        start = threshold(projected_cases, 100)
-        if start != None and start < len(projected_cases):
-            new_cases = convert_delta(convert_smooth(projected_cases[start:], 6))
-            ongoing_cases = convert_smooth(get_ongoing_confirmed_cases(sr)[start:], 6)
+        estimated_cases = convert_per_100k(sr, convert_smooth(get_estimated_cases(sr), default_smooth))
+        start = threshold(estimated_cases, 1)
+        if start != None and start < len(estimated_cases):
+            new_cases = convert_delta(estimated_cases)[start:]
+            ongoing_cases = convert_per_100k(sr, convert_smooth(get_ongoing_estimated_cases(sr), default_smooth)[start:])
             max_new = max(max_new, max(new_cases))
             max_ongoing = max(max_ongoing, max(ongoing_cases))
             ax.plot(ongoing_cases, new_cases, label=sr.subregion)
-    max_series = [10, max(max_new, max_ongoing)]
+    max_series = [1, max(max_new, max_ongoing)]
     ax.plot(max_series, max_series, label='Danger!')
     ax.legend()
     plt.show()
