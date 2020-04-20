@@ -217,9 +217,7 @@ class RegionData:
         return self.cases
 
     def confirmed_new(self):
-        def data_fun():
-            return convert_delta(self.confirmed_total())
-        return self.memoize('confirmed_new', data_fun)
+        return self.memoize('confirmed_new', lambda: convert_delta(self.confirmed_total()))
 
     def confirmed_ongoing(self):
         def data_fun():
@@ -232,12 +230,15 @@ class RegionData:
                         for i in range(len(new_cases))]
         return self.memoize('confirmed_ongoing', data_fun)
 
-    def confirmed_deaths(self):
+    def deaths_total(self):
         if self.deaths:
             return self.deaths
         def data_fun():
             return [c * nominal_death_rate for c in self.cases[nominal_confirm_to_death:]]
-        return self.memoize('confirmed_deaths', data_fun)
+        return self.memoize('deaths_total', data_fun)
+
+    def deaths_new(self):
+        return self.memoize('deaths_new', lambda: convert_delta(self.deaths_total()))
 
     def estimated_total(self):
         def estimated_fun():
@@ -275,8 +276,11 @@ class RegionData:
     def percapita_confirmed_ongoing(self):
         return self.percapita('percapita_confirmed_ongoing', self.confirmed_ongoing)
 
-    def percapita_confirmed_deaths(self):
-        return self.percapita('percapita_confirmed_deaths', self.confirmed_deaths)
+    def percapita_deaths_total(self):
+        return self.percapita('percapita_deaths_total', self.deaths_total)
+
+    def percapita_deaths_new(self):
+        return self.percapita('percapita_deaths_new', self.deaths_new)
 
     def percapita_estimated_total(self):
         return self.percapita('percapita_estimated_total', self.estimated_total)
@@ -436,22 +440,124 @@ def merge_data(subregion_cases, subregion_deaths, subregion_recovered):
 
 # Main script begins here
 
-def plot_srs(title, xlabel, ylabel, srs, threshold_func, data_func, label_func, yscale='log'):
+class XAxis:
+    axis_label = ''
+    _data_start_func = lambda self, r: 0
+
+    def __init__(self, axis_label, data_start_func, lazy_xaxis_func=None):
+        self.axis_label = axis_label
+        self._data_start_func = data_start_func
+        self._lazy_xaxis_func = lazy_xaxis_func
+
+    def set_yaxis(self, yaxis):
+        if self._lazy_xaxis_func:
+            xaxis = self._lazy_xaxis_func(yaxis)
+            self.axis_label = xaxis.axis_label
+            self._data_start_func = xaxis._data_start_func
+
+    def data_start(self, r):
+        return self._data_start_func(r)
+
+    @staticmethod
+    def since_day(day_num):
+        global dates
+        return XAxis(str(dates[day_num]), lambda r, y: day_num)
+
+    @staticmethod
+    def since_threshold(data_name, val, data_func):
+        return XAxis('Days Since %g %s' % (val, data_name,),
+                     lambda r: threshold(data_func(r), val))
+
+    @staticmethod
+    def since_yaxis_threshold(val):
+        return XAxis(None, None,
+                     lambda yaxis: XAxis('Days Since %g %s' % (val, yaxis.axis_label,),
+                                   lambda r: threshold(yaxis.data_values(r), val)))
+
+
+class YAxis:
+    axis_label = ''
+    title_part = ''
+    scale = 'log'
+    _data_label_func = lambda self, r: ''
+    _data_values_func = lambda self, r: []
+
+    def __init__(self, title_part, axis_label, scale, data_label_func, data_values_func):
+        self.title_part = title_part
+        self.axis_label = axis_label
+        self.scale = scale
+        self._data_label_func = data_label_func
+        self._data_values_func = data_values_func
+
+    def data_label(self, r):
+        return self._data_label_func(r)
+
+    def data_values(self, r):
+        return self._data_values_func(r)
+
+    @staticmethod
+    def log_confirmed_total_per_million():
+        return YAxis('Total Confirmed COVID-19 Cases', 'Cases Per 1M', 'log',
+                     lambda r: r.prettyname,
+                     lambda r: [c * 1e6 for c in r.percapita_confirmed_total()])
+
+    @staticmethod
+    def log_confirmed_new_per_million_smoothed():
+        return YAxis('Daily New Confirmed COVID-19 Cases (Smoothed)', 'Cases Per 1M', 'log',
+                     lambda r: r.prettyname,
+                     lambda r: [c * 1e6 for c in convert_smooth(r.percapita_confirmed_new())])
+
+    @staticmethod
+    def log_estimated_total_per_million():
+        return YAxis('Total Estimated COVID-19 Cases', 'Cases Per 1M', 'log',
+                     lambda r: '%s (%.2g%%)' %(r.prettyname, 100 / r.estimation_factor(),),
+                     lambda r: [c * 1e6 for c in r.percapita_estimated_total()])
+
+    @staticmethod
+    def log_deaths_total_per_million():
+        return YAxis('Total Deaths Attributed To COVID-19', 'Deaths Per 1M', 'log',
+                     lambda r: r.prettyname,
+                     lambda r: [c * 1e6 for c in r.percapita_deaths_total()])
+
+    @staticmethod
+    def log_deaths_new_per_million_smoothed():
+        return YAxis('New Deaths Attributed To COVID-19', 'Deaths Per 1M', 'log',
+                     lambda r: r.prettyname,
+                     lambda r: [c * 1e6 for c in convert_smooth(r.percapita_deaths_new())])
+
+    @staticmethod
+    def log_confirmed_ongoing_per_million():
+        return YAxis('Unresolved Confirmed COVID-19 Cases', 'Unresolved Cases Per 1M', 'log',
+                     lambda r: r.prettyname,
+                     lambda r: [c * 1e6 for c in r.percapita_confirmed_ongoing()])
+
+
+class RegionSet:
+    title_part = ''
+    regions = []
+
+    def __init__(self, title_part, regions):
+        self.title_part = title_part
+        self.regions = regions
+
+
+def plot_srs(xaxis, yaxis, regions):
     fig, ax = plt.subplots()
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel(ylabel)
-    ax.set_yscale(yscale)
-    ax.set_title(title)
+    xaxis.set_yaxis(yaxis)
+    ax.set_title(yaxis.title_part + ' ' + regions.title_part)
+    ax.set_xlabel(xaxis.axis_label)
+    ax.set_ylabel(yaxis.axis_label)
+    ax.set_yscale(yaxis.scale)
 
     min_len = 3
 
     plots_to_do = []
-    for sr in srs:
-        start = threshold_func(sr)
+    for r in regions.regions:
+        start = xaxis.data_start(r)
         if start != None:
-            data = data_func(sr)[start:]
+            data = yaxis.data_values(r)[start:]
             if len(data) >= min_len:
-                plots_to_do.append((list(range(len(data))), data, label_func(sr),))
+                plots_to_do.append((list(range(len(data))), data, yaxis.data_label(r),))
 
     if len(plots_to_do) < 1:
         print('No data for chart "%s"' % (title,))
@@ -469,77 +575,6 @@ def plot_srs(title, xlabel, ylabel, srs, threshold_func, data_func, label_func, 
         ax.plot(p[0][:max_len], p[1][:max_len], label=p[2])
     ax.legend()
     plt.show()
-
-def plot_compare(title, xlabel, ylabel, srs, threshold_func, data_funcs, label_funcs, yscale='log'):
-    fig, ax = plt.subplots()
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel(ylabel)
-    ax.set_yscale(yscale)
-    ax.set_title(title)
-    for sr in srs:
-        start = threshold_func(sr)
-        if start != None:
-            for i in range(len(data_funcs)):
-                data = data_funcs[i](sr)[start:]
-                ax.plot(range(max(0, len(data) - start)), data[start:], label=label_funcs[i](sr))
-    ax.legend()
-    plt.show()
-
-
-class XAxis:
-    _label = ''
-    _threshold_func = lambda r: 0
-
-    def __init__(self, label, threshold_func):
-        self._label = label
-        self._threshold_func = threshold_func
-
-    def label(self):
-        return self._label
-
-    def start(self, r):
-        return threshold_func(r)
-
-    @staticmethod
-    def from_day(day_num):
-        global dates
-        return XAxis(str(dates[day_num]), lambda r: day_num)
-
-    @staticmethod
-    def from_confirmed_cases(cases):
-        return XAxis('Days Since %g Cases Confirmed' % (cases,),
-            lambda sr: threshold(sr.confirmed_total(), cases))
-
-    @staticmethod
-    def from_confirmed_cases_per_million(cases_per_million):
-        return XAxis('Days Since %g Cases Per 1M Confirmed' % (cases_per_million,),
-            lambda sr: threshold(sr.percapita_confirmed_total(), cases_per_million / 1e6))
-
-    @staticmethod
-    def from_estimated_cases_per_million(cases_per_million):
-        return XAxis('Days Since %g Cases Per 1M Estimated' % (cases_per_million,),
-            lambda sr: threshold(sr.percapita_estimated_total(), cases_per_million / 1e6))
-
-
-class YAxis:
-    _label = ''
-    _scale = 'log'
-
-    def __init__(self, label, scale = 'log'):
-        self._label = label
-        self._scale = scale
-
-    def label(self):
-        return self._label
-
-    def scale(self):
-        return self._scale
-
-
-log_confirmed_per_million = YAxis('Confirmed Cases Per 1M')
-log_estimated_per_million = YAxis('Estimated Cases Per 1M')
-log_deaths_per_million = YAxis('Deaths Per 1M')
-log_confirmed_ongoing_per_million = YAxis('Deaths Per 1M')
 
 
 cases_data_format, subregion_cases = \
@@ -576,161 +611,104 @@ reference_region.population = 1e6
 
 dates = cases_data_format.dates
 
-significant_canada_subregions = [subregions[n] for n in ['canada/british columbia', 'canada/alberta', 'canada/ontario', 'canada/quebec']]
-international_subregions = [subregions[n] for n in ['canada/british columbia', 'china/hubei']] + [regions[n] for n in ['canada', 'korea, south', 'japan', 'italy', 'france', 'us', 'germany', 'sweden']]
+significant_canada_subregions = RegionSet('In Canada',
+                                          [subregions[n] for n in ['canada/british columbia', 'canada/alberta',
+                                                                   'canada/ontario', 'canada/quebec']])
+international_subregions = RegionSet('Internationally',
+                                     [subregions[n] for n in ['canada/british columbia', 'china/hubei']]
+                                     + [regions[n] for n in ['canada', 'korea, south', 'japan', 'italy',
+                                                             'france', 'us', 'germany', 'sweden']])
 
 if False:
-    plot_srs(
-        title='COVID-19 Confirmed Cases In Canada',
-        xlabel='Days Since 10 Cases Per 1M Confirmed',
-        ylabel='Confirmed Cases Per 1M',
-        srs=[reference_region] + significant_canada_subregions,
-        threshold_func=lambda sr: threshold((c * 1e6 for c in sr.percapita_confirmed_total()), 10),
-        data_func=lambda sr: [c * 1e6 for c in sr.percapita_confirmed_total()],
-        label_func=lambda sr: sr.prettyname)
+    plot_srs(xaxis=XAxis.since_yaxis_threshold(10),
+             yaxis=YAxis.log_confirmed_total_per_million(),
+             regions=significant_canada_subregions)
 
 if False:
-    plot_srs(
-        title='COVID-19 Confirmed Cases Internationally',
-        xlabel='Days Since 10 Cases Per 1M Confirmed',
-        ylabel='Confirmed Cases Per 1M',
-        srs=[reference_region] + international_subregions,
-        threshold_func=lambda sr: threshold((c * 1e6 for c in sr.percapita_confirmed_total()), 10),
-        data_func=lambda sr: [c * 1e6 for c in sr.percapita_confirmed_total()],
-        label_func=lambda sr: sr.prettyname)
-
-if False:
-    plot_srs(
-        title='New COVID-19 Confirmed Cases In Canada',
-        xlabel='Days Since 10 Cases Per 1M Confirmed',
-        ylabel='New Confirmed Cases Per 1M',
-        srs=significant_canada_subregions,
-        threshold_func=lambda sr: threshold((c * 1e6 for c in sr.percapita_confirmed_total()), 10),
-        data_func=lambda sr: [c * 1e6 for c in convert_smooth(sr.percapita_confirmed_total())],
-        label_func=lambda sr: sr.prettyname)
+    plot_srs(xaxis=XAxis.since_yaxis_threshold(10),
+             yaxis=YAxis.log_confirmed_total_per_million(),
+             regions=international_subregions)
 
 if True:
-    plot_srs(
-        title='COVID-19 Cases In Treatment In Canada',
-        xlabel='Days Since ' + str(dates[40]),
-        ylabel='Cases In Treatment Per 1M',
-        srs=significant_canada_subregions,
-        threshold_func=lambda sr: 40,
-        data_func=lambda sr: [c * 1e6 for c in sr.percapita_confirmed_ongoing()],
-        label_func=lambda sr: sr.prettyname)
+    plot_srs(xaxis=XAxis.since_threshold('Cases Per 1M', 10, lambda r: [c * 1e6 for c in r.percapita_confirmed_total()]),
+             yaxis=YAxis.log_confirmed_new_per_million_smoothed(),
+             regions=significant_canada_subregions,)
 
 if True:
-    plot_srs(
-        title='COVID-19 Cases In Treatment Internationally',
-        xlabel='Days Since 10 Cases Per 1M Confirmed',
-        ylabel='Cases In Treatment Per 1M',
-        srs=international_subregions,
-        threshold_func=lambda sr: threshold((c * 1e6 for c in sr.percapita_confirmed_total()), 10),
-        data_func=lambda sr: [c * 1e6 for c in sr.percapita_confirmed_ongoing()],
-        label_func=lambda sr: sr.prettyname)
+    plot_srs(xaxis=XAxis.since_threshold('Cases Per 1M', 10, lambda r: [c * 1e6 for c in r.percapita_confirmed_total()]),
+             yaxis=YAxis.log_confirmed_new_per_million_smoothed(),
+             regions=international_subregions,)
+
+if True:
+    plot_srs(xaxis=XAxis.since_threshold('Deaths Per 1M', 1, lambda r: convert_smooth([c * 1e6 for c in r.percapita_deaths_total()])),
+             yaxis=YAxis.log_deaths_new_per_million_smoothed(),
+             regions=international_subregions,)
 
 if False:
-    plot_srs(
-        title='Deaths From COVID-19 In Canada',
-        xlabel='Days Since ' + str(dates[40]),
-        ylabel='Deaths Per 1M',
-        srs=significant_canada_subregions,
-        threshold_func=lambda sr: 40,
-        data_func=lambda sr: [c * 1e6 for c in sr.percapita_confirmed_deaths()],
-        label_func=lambda sr: sr.prettyname)
+    plot_srs(xaxis=XAxis.since_yaxis_threshold(10),
+             yaxis=YAxis.log_confirmed_ongoing_per_million(),
+             regions=significant_canada_subregions,)
 
 if False:
-    plot_srs(
-        title='Estimated Actual COVID-19 Cases In Canada',
-        xlabel='Days Since 10 Cases Per 1M Confirmed',
-        ylabel='Estimated Cases Per 1M',
-        srs=[reference_region] + significant_canada_subregions,
-        threshold_func=lambda sr: threshold((c * 1e6 for c in sr.percapita_confirmed_total()), 10),
-        data_func=lambda sr: [c * 1e6 for c in sr.percapita_estimated_total()],
-        label_func=lambda sr: '%s (%gx)' %(sr.prettyname, sr.estimation_factor(),))
+    plot_srs(xaxis=XAxis.since_yaxis_threshold(10),
+             yaxis=YAxis.log_confirmed_ongoing_per_million(),
+             regions=international_subregions,)
 
 if False:
-    plot_srs(
-        title='Estimated Actual COVID-19 Cases Internationally',
-        xlabel='Days Since 10 Cases Per 1M Estimated',
-        ylabel='Estimated Cases Per 1M',
-        srs=[reference_region] + international_subregions,
-        threshold_func=lambda sr: threshold((c * 1e6 for c in sr.percapita_confirmed_total()), 10),
-        data_func=lambda sr: [c * 1e6 for c in sr.percapita_estimated_total()],
-        label_func=lambda sr: '%s (%gx)' %(sr.prettyname, sr.estimation_factor(),))
+    plot_srs(xaxis=XAxis.since_day(40), yaxis=YAxis.log_deaths_per_million(),
+             regions=significant_canada_subregions,)
 
 if False:
-    plot_compare(
-        title='Comparison Of Estimated Vs. Confirmed Cases',
-        xlabel='Days Since 10 Cases Per 1M Confirmed',
-        ylabel='Estimated Cases Per 1M',
-        srs=[subregions['canada/british columbia']],#international_subregions,
-        threshold_func=lambda sr: threshold((c * 1e6 for c in sr.percapita_confirmed_total()), 10),
-        data_funcs=[
-            lambda sr: [c * 1e6 for c in sr.percapita_confirmed_total()],
-            lambda sr: [c * 1e6 for c in sr.percapita_estimated_total()],
-        ],
-        label_funcs=[
-            lambda sr: sr.prettyname + ' (confirmed)',
-            lambda sr: sr.prettyname + ' (estimated)',
-        ])
+    plot_srs(xaxis=XAxis.since_day(40), yaxis=YAxis.log_deaths_per_million(),
+             regions=international_subregions,)
 
 if False:
-    plot_srs(
-        title='Comparison Of Estimated Vs. Confirmed Cases In Canada',
-        xlabel='Days Since ' + str(dates[40]),
-        ylabel='Estimated Actual Cases / Confirmed Cases',
-        srs=significant_canada_subregions,
-        threshold_func=lambda sr: 40,
-        data_func=lambda sr: list(map(lambda c, p: c / p if p else 1, sr.confirmed_total(), sr.estimated_total())),
-        label_func=lambda sr: sr.prettyname)
+    plot_srs(xaxis=XAxis.since_yaxis_threshold(100),
+             yaxis=YAxis.log_estimated_total_per_million(),
+             regions=significant_canada_subregions,)
 
 if False:
-    plot_srs(
-        title='Comparison Of Estimated Vs. Confirmed Cases Internationally',
-        xlabel='Days Since ' + str(dates[40]),
-        ylabel='Estimated Actual Cases / Confirmed Cases',
-        srs=international_subregions,
-        threshold_func=lambda sr: 40,
-        data_func=lambda sr: list(map(lambda c, p: c / p if p else 1, sr.confirmed_total(), sr.estimated_total())),
-        label_func=lambda sr: sr.prettyname)
+    plot_srs(xaxis=XAxis.since_yaxis_threshold(100),
+             yaxis=YAxis.log_estimated_total_per_million(),
+             regions=international_subregions,)
 
 if False:
     fig, ax = plt.subplots()
     ax.set_xlabel('Difference In Days Between Average Confirmation And Average Death')
-    ax.set_ylabel('Normalized RMS Of Overall Difference')
+    ax.set_ylabel('RMS Of Normalized Difference')
     ax.set_yscale('linear')
-    ax.set_title('Fit Of Confirmed To Estimated Cases')
-    for sr in international_subregions:
+    ax.set_title('Fit Of Daily New Confirmed Cases To New Deaths')
+    for sr in international_subregions.regions:
         start = next((i for i in range(len(sr.deaths)) if sr.deaths[i] >= 10), -1)
         if start < 0:
             continue
 
         start = max(0, start - (default_smooth // 2))
-        confirmed = convert_smooth(sr.confirmed_total(), default_smooth)
-        estimated = convert_smooth([d / nominal_death_rate for d in sr.deaths], default_smooth)
-        data_len = min(len(confirmed), len(estimated))
+        confirmed = convert_smooth(sr.confirmed_new(), default_smooth)
+        deaths = convert_smooth(sr.deaths_new(), default_smooth)
+        data_len = min(len(confirmed), len(deaths))
 
         xs = []
         ys = []
         for i in range(-5, nominal_death + 5):
             cs, ce = start, data_len
-            es, ee = start + i, data_len + i
-            if es < 0:
-                cs -= es
-                es -= es
-            if ee > len(estimated):
-                ce -= ee - len(estimated)
-                ee -= ee - len(estimated)
+            ds, de = start + i, data_len + i
+            if ds < 0:
+                cs -= ds
+                ds -= ds
+            if de > len(deaths):
+                ce -= de - len(deaths)
+                de -= de - len(deaths)
             n = ce - cs
             if n < 4:
                 continue
             confirmed_slice = confirmed[cs:ce]
-            estimated_slice = estimated[es:ee]
-            norm = sum(estimated_slice) / sum(confirmed_slice)
+            deaths_slice = deaths[ds:de]
+            d_norm = sum(deaths_slice) / n
+            c_norm = sum(confirmed_slice) / n
             xs.append(i)
-            ys.append(math.sqrt(sum(map(lambda d: (d[0] - d[1] * norm) ** 2,
-                zip(confirmed_slice, estimated_slice))) / (n - 1)))
+            ys.append(math.sqrt(sum(map(lambda d: (d[0] / c_norm - d[1] / d_norm) ** 2,
+                zip(confirmed_slice, deaths_slice))) / (n - 1)))
         ax.plot(xs, [y / sum(ys) for y in ys], label=sr.prettyname,)
     ax.legend()
     plt.show()
@@ -744,8 +722,8 @@ if False:
     ax.set_title('New Cases For Existing Cases In Canada')
     max_new = 0
     max_ongoing = 0
-    for sr in significant_canada_subregions:
-        cases = convert_smooth(sr.percapita_confirmed_total())
+    for sr in significant_canada_subregions.regions:
+        cases = [c * 1e6 for c in convert_smooth(sr.percapita_confirmed_total())]
         start = threshold(cases, 10)
         if start != None and start < len(cases):
             new_cases = [d * nominal_recovery for d in convert_delta(cases)[start:]]
@@ -765,7 +743,7 @@ if False:
     ax.set_ylabel('New Cases \u22C5 Recovery Time Per 1M')
     ax.set_yscale('log')
     ax.set_title('New Cases For Existing Cases Internationally')
-    for sr in international_subregions:
+    for sr in international_subregions.regions:
         cases = [c * 1e6 for c in convert_smooth(sr.percapita_confirmed_total())]
         start = threshold(cases, 10)
         if start != None and start < len(cases):
