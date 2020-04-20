@@ -19,6 +19,59 @@ region_populations = {
     'canada/northwest territories': 44904,
     'canada/nunavut': 39097,
 
+    'us/california': 39937489,
+    'us/texas': 29472295,
+    'us/florida': 21992985,
+    'us/new york': 19440469,
+    'us/pennsylvania': 12820878,
+    'us/illinois': 12659682,
+    'us/ohio': 11747694,
+    'us/georgia': 10736059,
+    'us/north carolina': 10611862,
+    'us/michigan': 10045029,
+    'us/new jersey': 8936574,
+    'us/virginia': 8626207,
+    'us/washington': 7797095,
+    'us/arizona': 7378494,
+    'us/massachusetts': 6976597,
+    'us/tennessee': 6897576,
+    'us/indiana': 6745354,
+    'us/missouri': 6169270,
+    'us/maryland': 6083116,
+    'us/wisconsin': 5851754,
+    'us/colorado': 5845526,
+    'us/minnesota': 5700671,
+    'us/south carolina': 5210095,
+    'us/alabama': 4908621,
+    'us/louisiana': 4645184,
+    'us/kentucky': 4499692,
+    'us/oregon': 4301089,
+    'us/oklahoma': 3954821,
+    'us/connecticut': 3563077,
+    'us/utah': 3282115,
+    'us/iowa': 3179849,
+    'us/nevada': 3139658,
+    'us/arkansas': 3038999,
+    'us/puerto rico': 3032165,
+    'us/mississippi': 2989260,
+    'us/kansas': 2910357,
+    'us/new mexico': 2096640,
+    'us/nebraska': 1952570,
+    'us/idaho': 1826156,
+    'us/west virginia': 1778070,
+    'us/hawaii': 1412687,
+    'us/new hampshire': 1371246,
+    'us/maine': 1345790,
+    'us/montana': 1086759,
+    'us/rhode island': 1056161,
+    'us/delaware': 982895,
+    'us/south dakota': 903027,
+    'us/north dakota': 761723,
+    'us/alaska': 734002,
+    'us/district of columbia': 720687,
+    'us/vermont': 628061,
+    'us/wyoming': 567025,
+
     'china/hubei': 59050000,
 
     'canada': 37855702,
@@ -312,7 +365,10 @@ class RegionData:
         else:
             self.name = source_cases.region.lower()
         self.id = self.name.lower()
-        self.prettyname = source_cases.adminregion or source_cases.subregion or source_cases.region
+        if source_cases.adminregion:
+            self.prettyname = '%s, %s' % (source_cases.adminregion, source_cases.subregion,)
+        else:
+            self.prettyname = source_cases.subregion or source_cases.region
         self.region = source_cases.region
         self.subregion = source_cases.subregion
         self.adminregion = source_cases.adminregion
@@ -619,6 +675,13 @@ international_subregions = RegionSet('Internationally',
                                      + [regions[n] for n in ['canada', 'korea, south', 'japan', 'italy',
                                                              'france', 'us', 'germany', 'sweden']])
 
+us_hotspot_states = RegionSet('In US Hotspot States',
+                              [subregions['canada/british columbia']]
+                              + sorted(us_subregions, key=lambda r: r.percapita_confirmed_total()[-1])[-10:])
+us_hotspot_cities = RegionSet('In US Hotspot Cities',
+                              [subregions['canada/british columbia']]
+                              + sorted(us_adminregions, key=lambda r: r.percapita_confirmed_total()[-1])[-10:])
+
 if False:
     plot_srs(xaxis=XAxis.since_yaxis_threshold(10),
              yaxis=YAxis.log_confirmed_total_per_million(),
@@ -630,6 +693,16 @@ if False:
              regions=international_subregions)
 
 if True:
+    plot_srs(xaxis=XAxis.since_yaxis_threshold(10),
+             yaxis=YAxis.log_confirmed_total_per_million(),
+             regions=us_hotspot_states,) 
+
+if True:
+    plot_srs(xaxis=XAxis.since_yaxis_threshold(10),
+             yaxis=YAxis.log_confirmed_total_per_million(),
+             regions=us_hotspot_cities,) 
+
+if True:
     plot_srs(xaxis=XAxis.since_threshold('Cases Per 1M', 10, lambda r: [c * 1e6 for c in r.percapita_confirmed_total()]),
              yaxis=YAxis.log_confirmed_new_per_million_smoothed(),
              regions=significant_canada_subregions,)
@@ -638,6 +711,16 @@ if True:
     plot_srs(xaxis=XAxis.since_threshold('Cases Per 1M', 10, lambda r: [c * 1e6 for c in r.percapita_confirmed_total()]),
              yaxis=YAxis.log_confirmed_new_per_million_smoothed(),
              regions=international_subregions,)
+
+if True:
+    plot_srs(xaxis=XAxis.since_threshold('Cases Per 1M', 10, lambda r: [c * 1e6 for c in r.percapita_confirmed_total()]),
+             yaxis=YAxis.log_confirmed_new_per_million_smoothed(),
+             regions=us_hotspot_states,) 
+
+if True:
+    plot_srs(xaxis=XAxis.since_threshold('Cases Per 1M', 10, lambda r: [c * 1e6 for c in r.percapita_confirmed_total()]),
+             yaxis=YAxis.log_confirmed_new_per_million_smoothed(),
+             regions=us_hotspot_cities,) 
 
 if True:
     plot_srs(xaxis=XAxis.since_threshold('Deaths Per 1M', 1, lambda r: convert_smooth([c * 1e6 for c in r.percapita_deaths_total()])),
