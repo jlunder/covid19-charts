@@ -84,6 +84,7 @@ region_populations = {
     'singapore': 5850342,
     'france': 65270000,
     'sweden': 10099265,
+    'brazil': 209500000,
     }
 
 class DataFormat:
@@ -531,6 +532,18 @@ class XAxis:
                                    lambda r: threshold(yaxis.data_values(r), val)))
 
 
+    @staticmethod
+    def since_confirmed_total_10_per_million():
+        return XAxis.since_threshold(
+            'Cases Per 1M', 10,
+            lambda r: [c * 1e6 for c in r.percapita_confirmed_total()])
+
+    @staticmethod
+    def since_deaths_total_smoothed_1_per_million():
+        return XAxis.since_threshold(
+            'Deaths Per 1M', 1,
+            lambda r: convert_smooth([c * 1e6 for c in r.percapita_deaths_total()]))
+
 class YAxis:
     axis_label = ''
     title_part = ''
@@ -673,7 +686,8 @@ significant_canada_subregions = RegionSet('In Canada',
 international_subregions = RegionSet('Internationally',
                                      [subregions[n] for n in ['canada/british columbia', 'china/hubei']]
                                      + [regions[n] for n in ['canada', 'korea, south', 'japan', 'italy',
-                                                             'france', 'us', 'germany', 'sweden']])
+                                                             'france', 'us', 'germany', 'sweden', 'brazil',
+                                                             ]])
 
 us_hotspot_states = RegionSet('In US Hotspot States',
                               [subregions['canada/british columbia']]
@@ -682,7 +696,9 @@ us_hotspot_cities = RegionSet('In US Hotspot Cities',
                               [subregions['canada/british columbia']]
                               + sorted(us_adminregions, key=lambda r: r.percapita_confirmed_total()[-1])[-10:])
 
-if False:
+
+
+if True:
     plot_srs(xaxis=XAxis.since_yaxis_threshold(10),
              yaxis=YAxis.log_confirmed_total_per_million(),
              regions=significant_canada_subregions)
@@ -692,42 +708,42 @@ if False:
              yaxis=YAxis.log_confirmed_total_per_million(),
              regions=international_subregions)
 
-if True:
+if False:
     plot_srs(xaxis=XAxis.since_yaxis_threshold(10),
              yaxis=YAxis.log_confirmed_total_per_million(),
              regions=us_hotspot_states,) 
 
-if True:
+if False:
     plot_srs(xaxis=XAxis.since_yaxis_threshold(10),
              yaxis=YAxis.log_confirmed_total_per_million(),
              regions=us_hotspot_cities,) 
 
 if True:
-    plot_srs(xaxis=XAxis.since_threshold('Cases Per 1M', 10, lambda r: [c * 1e6 for c in r.percapita_confirmed_total()]),
+    plot_srs(xaxis=XAxis.since_confirmed_total_10_per_million(),
              yaxis=YAxis.log_confirmed_new_per_million_smoothed(),
              regions=significant_canada_subregions,)
 
-if True:
-    plot_srs(xaxis=XAxis.since_threshold('Cases Per 1M', 10, lambda r: [c * 1e6 for c in r.percapita_confirmed_total()]),
+if False:
+    plot_srs(xaxis=XAxis.since_confirmed_total_10_per_million(),
              yaxis=YAxis.log_confirmed_new_per_million_smoothed(),
              regions=international_subregions,)
 
-if True:
-    plot_srs(xaxis=XAxis.since_threshold('Cases Per 1M', 10, lambda r: [c * 1e6 for c in r.percapita_confirmed_total()]),
+if False:
+    plot_srs(xaxis=XAxis.since_confirmed_total_10_per_million(),
              yaxis=YAxis.log_confirmed_new_per_million_smoothed(),
-             regions=us_hotspot_states,) 
+             regions=us_hotspot_states,)
+
+if False:
+    plot_srs(xaxis=XAxis.since_confirmed_total_10_per_million(),
+             yaxis=YAxis.log_confirmed_new_per_million_smoothed(),
+             regions=us_hotspot_cities,)
 
 if True:
-    plot_srs(xaxis=XAxis.since_threshold('Cases Per 1M', 10, lambda r: [c * 1e6 for c in r.percapita_confirmed_total()]),
-             yaxis=YAxis.log_confirmed_new_per_million_smoothed(),
-             regions=us_hotspot_cities,) 
-
-if True:
-    plot_srs(xaxis=XAxis.since_threshold('Deaths Per 1M', 1, lambda r: convert_smooth([c * 1e6 for c in r.percapita_deaths_total()])),
+    plot_srs(xaxis=XAxis.since_deaths_total_smoothed_1_per_million(),
              yaxis=YAxis.log_deaths_new_per_million_smoothed(),
              regions=international_subregions,)
 
-if False:
+if True:
     plot_srs(xaxis=XAxis.since_yaxis_threshold(10),
              yaxis=YAxis.log_confirmed_ongoing_per_million(),
              regions=significant_canada_subregions,)
@@ -745,12 +761,22 @@ if False:
     plot_srs(xaxis=XAxis.since_day(40), yaxis=YAxis.log_deaths_per_million(),
              regions=international_subregions,)
 
-if False:
+if True:
     plot_srs(xaxis=XAxis.since_yaxis_threshold(100),
              yaxis=YAxis.log_estimated_total_per_million(),
              regions=significant_canada_subregions,)
 
-if False:
+if True:
+    plot_srs(xaxis=XAxis.since_yaxis_threshold(100),
+             yaxis=YAxis.log_estimated_total_per_million(),
+             regions=us_hotspot_states,) 
+
+if True:
+    plot_srs(xaxis=XAxis.since_yaxis_threshold(100),
+             yaxis=YAxis.log_estimated_total_per_million(),
+             regions=us_hotspot_cities,) 
+
+if True:
     plot_srs(xaxis=XAxis.since_yaxis_threshold(100),
              yaxis=YAxis.log_estimated_total_per_million(),
              regions=international_subregions,)
