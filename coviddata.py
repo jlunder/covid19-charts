@@ -10,7 +10,7 @@ nominal_death = 18
 nominal_confirm_to_death = nominal_death - nominal_confirm
 nominal_confirm_to_recovery = nominal_confirm - nominal_recovery
 
-default_smooth = 6
+default_smooth = 7
 
 region_populations = {
     'canada/alberta': 4413146,

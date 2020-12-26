@@ -28,7 +28,7 @@ class XAxis:
     @staticmethod
     def since_day(day_num):
         global dates
-        return XAxis(str(dates[day_num]), lambda r, y: day_num)
+        return XAxis(str(dates[day_num]), lambda r: day_num)
 
     @staticmethod
     def since_threshold(data_name, val, data_func):
@@ -79,6 +79,12 @@ class YAxis:
         return YAxis('Total Confirmed COVID-19 Cases', 'Cases Per 1M', 'log',
                      lambda r: r.prettyname,
                      lambda r: [c * 1e6 for c in r.percapita_confirmed_total()])
+
+    @staticmethod
+    def log_confirmed_new_per_million():
+        return YAxis('Daily New Confirmed COVID-19 Cases', 'Cases Per 1M', 'log',
+                     lambda r: r.prettyname,
+                     lambda r: [c * 1e6 for c in r.percapita_confirmed_new()])
 
     @staticmethod
     def log_confirmed_new_per_million_smoothed():
@@ -201,7 +207,7 @@ international_subregions = RegionSet('Internationally',
 
 us_hotspot_states = RegionSet('In US Hotspot States',
                               [subregions['canada/british columbia']]
-                              + sorted([r for r in us_adminregions if r.population > 100000],
+                              + sorted([r for r in us_subregions if r.population > 100000],
                                        key=lambda r: r.percapita_confirmed_total()[-1])[-10:])
 us_hotspot_cities = RegionSet('In US Hotspot Cities',
                               [subregions['canada/british columbia']]
@@ -210,7 +216,7 @@ us_hotspot_cities = RegionSet('In US Hotspot Cities',
 
 
 
-if True:
+if False:
     plot_srs(xaxis=XAxis.since_yaxis_threshold(10),
              yaxis=YAxis.log_confirmed_total_per_million(),
              regions=significant_canada_subregions)
@@ -230,7 +236,7 @@ if False:
              yaxis=YAxis.log_confirmed_total_per_million(),
              regions=us_hotspot_cities,) 
 
-if True:
+if False:
     plot_srs(xaxis=XAxis.since_confirmed_total_10_per_million(),
              yaxis=YAxis.log_confirmed_new_per_million_smoothed(),
              regions=significant_canada_subregions,)
@@ -250,12 +256,12 @@ if False:
              yaxis=YAxis.log_confirmed_new_per_million_smoothed(),
              regions=us_hotspot_cities,)
 
-if True:
+if False:
     plot_srs(xaxis=XAxis.since_deaths_total_smoothed_1_per_million(),
              yaxis=YAxis.log_deaths_new_per_million_smoothed(),
              regions=international_subregions,)
 
-if True:
+if False:
     plot_srs(xaxis=XAxis.since_yaxis_threshold(10),
              yaxis=YAxis.log_confirmed_ongoing_per_million(),
              regions=significant_canada_subregions,)
@@ -273,22 +279,22 @@ if False:
     plot_srs(xaxis=XAxis.since_day(40), yaxis=YAxis.log_deaths_per_million(),
              regions=international_subregions,)
 
-if True:
+if False:
     plot_srs(xaxis=XAxis.since_yaxis_threshold(100),
              yaxis=YAxis.log_estimated_total_per_million(),
              regions=significant_canada_subregions,)
 
-if True:
+if False:
     plot_srs(xaxis=XAxis.since_yaxis_threshold(100),
              yaxis=YAxis.log_estimated_total_per_million(),
              regions=us_hotspot_states,) 
 
-if True:
+if False:
     plot_srs(xaxis=XAxis.since_yaxis_threshold(100),
              yaxis=YAxis.log_estimated_total_per_million(),
              regions=us_hotspot_cities,) 
 
-if True:
+if False:
     plot_srs(xaxis=XAxis.since_yaxis_threshold(100),
              yaxis=YAxis.log_estimated_total_per_million(),
              regions=international_subregions,)
@@ -373,3 +379,19 @@ if False:
     ax.legend()
     plt.show()
 
+
+if True:
+    plot_srs(xaxis=XAxis.since_day(1),
+             yaxis=YAxis.log_confirmed_new_per_million_smoothed(),
+             regions=significant_canada_subregions,)
+
+if True:
+    plot_srs(xaxis=XAxis.since_day(1),
+             yaxis=YAxis.log_confirmed_new_per_million_smoothed(),
+             regions=us_hotspot_states,) 
+
+if True:
+    plot_srs(xaxis=XAxis.since_day(1),
+             yaxis=YAxis.log_confirmed_new_per_million_smoothed(),
+             regions=international_subregions,)
+ 
